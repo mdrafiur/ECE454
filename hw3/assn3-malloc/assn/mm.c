@@ -14,7 +14,6 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdint.h>
-#include <math.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -39,7 +38,7 @@ team_t team = {
 /*************************************************************************
  * Basic Constants and Macros
  * You are not required to use these macros but may find them helpful.
-*************************************************************************/
+ *************************************************************************/
 #define WSIZE       sizeof(void *)            /* word size (bytes) */
 #define DSIZE       (2 * WSIZE)            /* doubleword size (bytes) */
 #define CHUNKSIZE   (1<<7)      /* initial heap size (bytes) */
@@ -68,33 +67,54 @@ team_t team = {
 #define PRED(bp) ((char *)bp)
 #define SUCC(bp) ((char *)(bp) + WSIZE)
 
+#define PUT_PTR(p1, p2) (*(void**)(p1) = (p2))
+
 void* heap_listp = NULL;
 
 #define SEG_LIST_SIZE 8
 #define MIN_BLOCK_SIZE (2 * DSIZE)
-#define LOG2_OF_MIN_BLOCK_SIZE (log2 (MIN_BLOCK_SIZE))
+#define LOG2_OF_MIN_BLOCK_SIZE 5
 
-void *SEGREGATED_LIST[SEG_LIST_SIZE] = {NULL}
+static void *SEGREGATED_LIST[SEG_LIST_SIZE] = {NULL};
 
+const int tab64[64] = {
+    63,  0, 58,  1, 59, 47, 53,  2,
+    60, 39, 48, 27, 54, 33, 42,  3,
+    61, 51, 37, 40, 49, 18, 28, 20,
+    55, 30, 34, 11, 43, 14, 22,  4,
+    62, 57, 46, 52, 38, 26, 32, 41,
+    50, 36, 17, 19, 29, 10, 13, 21,
+    56, 45, 25, 31, 35, 16,  9, 12,
+    44, 24, 15,  8, 23,  7,  6,  5};
 
+int logBase2 (uint64_t value)
+{
+    value |= value >> 1;
+    value |= value >> 2;
+    value |= value >> 4;
+    value |= value >> 8;
+    value |= value >> 16;
+    value |= value >> 32;
+    return tab64[((uint64_t)((value - (value >> 1))*0x07EDD5E59A4E28C2)) >> 58];
+}
 
 /**********************************************************
  * mm_init
  * Initialize the heap, including "allocation" of the
  * prologue and epilogue
  **********************************************************/
- int mm_init(void)
- {
-   if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
-         return -1;
-     PUT(heap_listp, 0);                         // alignment padding
-     PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));   // prologue header
-     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));   // prologue footer
-     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));    // epilogue header
-     heap_listp += DSIZE;
+int mm_init(void)
+{
+    if ((heap_listp = mem_sbrk(4*WSIZE)) == (void *)-1)
+        return -1;
+    PUT(heap_listp, 0);                         // alignment padding
+    PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));   // prologue header
+    PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));   // prologue footer
+    PUT(heap_listp + (3 * WSIZE), PACK(0, 1));    // epilogue header
+    heap_listp += DSIZE;
 
-     return 0;
- }
+    return 0;
+}
 
 /**********************************************************
  * coalesce
@@ -164,7 +184,7 @@ void *extend_heap(size_t words)
 
 int get_seg_list_index(size_t block_size)
 {
-    size = --block_size;
+    size_t size = --block_size;
     size |= size >> 1;
     size |= size >> 2;
     size |= size >> 4;
@@ -172,7 +192,7 @@ int get_seg_list_index(size_t block_size)
     size |= size >> 16;
     size++;
 
-    int exponent = log2 ((double)size);    
+    int exponent = logBase2(size);    
 
     if(exponent < (SEG_LIST_SIZE + LOG2_OF_MIN_BLOCK_SIZE))
         return (block_size < size) ? (exponent - LOG2_OF_MIN_BLOCK_SIZE - 1) : (exponent - LOG2_OF_MIN_BLOCK_SIZE);
@@ -182,23 +202,23 @@ int get_seg_list_index(size_t block_size)
 
 void add_front_of_free_list(void *bp)
 {
-        size_t block_size = GET_SIZE(HDRP(bp));
-        int index = get_seg_list_index(block_size);
+    size_t block_size = GET_SIZE(HDRP(bp));
+    int index = get_seg_list_index(block_size);
 
-        if(SEGREGATED_LIST[index])
-        {
-            void *current = SEGREGATED_LIST[index];
-            SUCC(bp) = current;
-            PRED(current) = bp;
-            SEGREGATED_LIST[index] = bp;
-            PRED(bp) = NULL;
-        }
-        else
-        {
-            SEGREGATED_LIST[index] = bp;
-            PRED(bp) = NULL;
-            SUCC(bp) = NULL;
-        }
+    if(SEGREGATED_LIST[index])
+    {
+        void *current = SEGREGATED_LIST[index];
+        PUT_PTR(SUCC(bp), current);
+        PUT_PTR(PRED(current), bp);
+        SEGREGATED_LIST[index] = bp;
+        PUT_PTR(PRED(bp), NULL);
+    }
+    else
+    {
+        SEGREGATED_LIST[index] = bp;
+        PUT_PTR(PRED(bp), NULL);
+        PUT_PTR(SUCC(bp), NULL);
+    }
 }
 
 void remove_from_free_list(void* bp) 
@@ -216,11 +236,11 @@ void remove_from_free_list(void* bp)
     }
 
     if(PRED(bp))
-        SUCC(PRED(bp)) = SUCC(bp);
+        PUT_PTR(SUCC(PRED(bp)), SUCC(bp));
 
     if(SUCC(bp))
-        PRED(SUCC(bp)) = PRED(bp);
-                  
+        PUT_PTR(PRED(SUCC(bp)), PRED(bp));
+
     return;
 }
 
@@ -241,9 +261,9 @@ void * find_fit(size_t asize)
     for(i = seg_list_index; i < SEG_LIST_SIZE; i++)
     {
         void *current = SEGREGATED_LIST[i];
-        while(current && GET_SIZE(HDRP(current) < asize)
-            current = SUCC(current);
-            
+        while(current && GET_SIZE(HDRP(current)) < asize)
+            PUT_PTR(current, SUCC(current));
+
         if(current)
         {
             remove_from_free_list(current);
@@ -275,18 +295,18 @@ void split(void *bp, size_t asize)
  **********************************************************/
 void place(void* bp, size_t asize)
 {
-  /* Get the current block size */
-  size_t bsize = GET_SIZE(HDRP(bp));
+    /* Get the current block size */
+    size_t bsize = GET_SIZE(HDRP(bp));
 
-  if(bsize >= (asize + MIN_BLOCK_SIZE))
-      split(bp, asize);
+    if(bsize >= (asize + MIN_BLOCK_SIZE))
+        split(bp, asize);
 
-  else
-  {
-      remove_from_free_list(bp);
-      PUT(HDRP(bp), PACK(bsize, 1));
-      PUT(FTRP(bp), PACK(bsize, 1));
-  }
+    else
+    {
+        remove_from_free_list(bp);
+        PUT(HDRP(bp), PACK(bsize, 1));
+        PUT(FTRP(bp), PACK(bsize, 1));
+    }
 }
 
 /**********************************************************
@@ -296,7 +316,7 @@ void place(void* bp, size_t asize)
 void mm_free(void *bp)
 {
     if(bp == NULL){
-      return;
+        return;
     }
     size_t size = GET_SIZE(HDRP(bp));
     PUT(HDRP(bp), PACK(size,0));
@@ -352,12 +372,12 @@ void *mm_realloc(void *ptr, size_t size)
 {
     /* If size == 0 then this is just free, and we return NULL. */
     if(size == 0){
-      mm_free(ptr);
-      return NULL;
+        mm_free(ptr);
+        return NULL;
     }
     /* If oldptr is NULL, then this is just malloc. */
     if (ptr == NULL)
-      return (mm_malloc(size));
+        return (mm_malloc(size));
 
     void *oldptr = ptr;
     void *newptr;
@@ -365,12 +385,12 @@ void *mm_realloc(void *ptr, size_t size)
 
     newptr = mm_malloc(size);
     if (newptr == NULL)
-      return NULL;
+        return NULL;
 
     /* Copy the old data. */
     copySize = GET_SIZE(HDRP(oldptr));
     if (size < copySize)
-      copySize = size;
+        copySize = size;
     memcpy(newptr, oldptr, copySize);
     mm_free(oldptr);
     return newptr;
@@ -382,5 +402,5 @@ void *mm_realloc(void *ptr, size_t size)
  * Return nonzero if the heap is consistant.
  *********************************************************/
 int mm_check(void){
-  return 1;
+    return 1;
 }
