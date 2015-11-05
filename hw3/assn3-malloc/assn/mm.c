@@ -14,6 +14,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <stdint.h>
+#include <math.h>
 
 #include "mm.h"
 #include "memlib.h"
@@ -23,12 +24,12 @@
  * provide your team information in the following struct.
  ********************************************************/
 team_t team = {
-    /* Team name */
-    "",
-    /* First member's full name */
-    "",
-    /* First member's email address */
-    "",
+    /* Eclipse */
+    "Eclipse",
+    /* Md Rafiur Rashid */
+    "Md Rafiur Rashid",
+    /* rafiur.rashid@mail.utoronto.ca */
+    "rafiur.rashid@mail.utoronto.ca",
     /* Second member's full name (leave blank if none) */
     "",
     /* Second member's email address (leave blank if none) */
@@ -64,7 +65,18 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
+#define PRED(bp) ((char *)bp)
+#define SUCC(bp) ((char *)(bp) + WSIZE)
+
 void* heap_listp = NULL;
+
+#define SEG_LIST_SIZE 8
+#define MIN_BLOCK_SIZE (2 * DSIZE)
+#define LOG2_OF_MIN_BLOCK_SIZE (log2 (MIN_BLOCK_SIZE))
+
+void *SEGREGATED_LIST[SEG_LIST_SIZE] = {NULL}
+
+
 
 /**********************************************************
  * mm_init
@@ -150,6 +162,67 @@ void *extend_heap(size_t words)
     return coalesce(bp);
 }
 
+int get_seg_list_index(size_t block_size)
+{
+    size = --block_size;
+    size |= size >> 1;
+    size |= size >> 2;
+    size |= size >> 4;
+    size |= size >> 8;
+    size |= size >> 16;
+    size++;
+
+    int exponent = log2 ((double)size);    
+
+    if(exponent < (SEG_LIST_SIZE + LOG2_OF_MIN_BLOCK_SIZE))
+        return (block_size < size) ? (exponent - LOG2_OF_MIN_BLOCK_SIZE - 1) : (exponent - LOG2_OF_MIN_BLOCK_SIZE);
+    else
+        return (SEG_LIST_SIZE - 1);
+}
+
+void add_front_of_free_list(void *bp)
+{
+        size_t block_size = GET_SIZE(HDRP(bp));
+        int index = get_seg_list_index(block_size);
+
+        if(SEGREGATED_LIST[index])
+        {
+            void *current = SEGREGATED_LIST[index];
+            SUCC(bp) = current;
+            PRED(current) = bp;
+            SEGREGATED_LIST[index] = bp;
+            PRED(bp) = NULL;
+        }
+        else
+        {
+            SEGREGATED_LIST[index] = bp;
+            PRED(bp) = NULL;
+            SUCC(bp) = NULL;
+        }
+}
+
+void remove_from_free_list(void* bp) 
+{
+    size_t block_size = GET_SIZE(HDRP(bp));
+    int index = get_seg_list_index(block_size);
+
+    if(SEGREGATED_LIST[index] == NULL)
+        return;
+
+    if(SEGREGATED_LIST[index] == bp)
+    {
+        SEGREGATED_LIST[index] =  SUCC(bp);
+        return;
+    }
+
+    if(PRED(bp))
+        SUCC(PRED(bp)) = SUCC(bp);
+
+    if(SUCC(bp))
+        PRED(SUCC(bp)) = PRED(bp);
+                  
+    return;
+}
 
 /**********************************************************
  * find_fit
@@ -159,15 +232,41 @@ void *extend_heap(size_t words)
  **********************************************************/
 void * find_fit(size_t asize)
 {
-    void *bp;
-    for (bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp))
+    assert(asize >= MIN_BLOCK_SIZE);
+    assert(asize % DSIZE == 0);
+
+    int i;
+    int seg_list_index = get_seg_list_index(asize);
+
+    for(i = seg_list_index; i < SEG_LIST_SIZE; i++)
     {
-        if (!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp))))
+        void *current = SEGREGATED_LIST[i];
+        while(current && GET_SIZE(HDRP(current) < asize)
+            current = SUCC(current);
+            
+        if(current)
         {
-            return bp;
+            remove_from_free_list(current);
+            return current;
         }
     }
     return NULL;
+}
+
+void split(void *bp, size_t asize)
+{
+    size_t remaining_size = GET_SIZE(HDRP(bp)) - asize;
+    void *split_block = (char*)(bp) + asize;
+
+    remove_from_free_list(bp);
+
+    PUT(HDRP(bp), PACK(asize, 1));
+    PUT(FTRP(bp), PACK(asize, 1));
+
+    PUT(HDRP(split_block), PACK(remaining_size, 0));
+    PUT(FTRP(split_block), PACK(remaining_size, 0));
+
+    add_front_of_free_list(split_block);
 }
 
 /**********************************************************
@@ -179,8 +278,15 @@ void place(void* bp, size_t asize)
   /* Get the current block size */
   size_t bsize = GET_SIZE(HDRP(bp));
 
-  PUT(HDRP(bp), PACK(bsize, 1));
-  PUT(FTRP(bp), PACK(bsize, 1));
+  if(bsize >= (asize + MIN_BLOCK_SIZE))
+      split(bp, asize);
+
+  else
+  {
+      remove_from_free_list(bp);
+      PUT(HDRP(bp), PACK(bsize, 1));
+      PUT(FTRP(bp), PACK(bsize, 1));
+  }
 }
 
 /**********************************************************
