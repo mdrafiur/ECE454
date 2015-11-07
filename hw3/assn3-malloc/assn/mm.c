@@ -190,6 +190,7 @@ int get_seg_list_index(size_t block_size)
     size |= size >> 4;
     size |= size >> 8;
     size |= size >> 16;
+    size |= size >> 32;
     size++;
 
     int exponent = logBase2(size);    
@@ -265,10 +266,7 @@ void * find_fit(size_t asize)
             PUT_PTR(current, SUCC(current));
 
         if(current)
-        {
-            remove_from_free_list(current);
             return current;
-        }
     }
     return NULL;
 }
@@ -281,10 +279,11 @@ void split(void *bp, size_t asize)
     remove_from_free_list(bp);
 
     PUT(HDRP(bp), PACK(asize, 1));
-    PUT(FTRP(bp), PACK(asize, 1));
+    //PUT(FTRP(bp), PACK(asize, 1));
 
     PUT(HDRP(split_block), PACK(remaining_size, 0));
     PUT(FTRP(split_block), PACK(remaining_size, 0));
+    coalesce(split_block);
 
     add_front_of_free_list(split_block);
 }
@@ -305,7 +304,7 @@ void place(void* bp, size_t asize)
     {
         remove_from_free_list(bp);
         PUT(HDRP(bp), PACK(bsize, 1));
-        PUT(FTRP(bp), PACK(bsize, 1));
+        //PUT(FTRP(bp), PACK(bsize, 1));
     }
 }
 
