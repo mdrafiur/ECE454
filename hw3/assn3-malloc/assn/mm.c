@@ -131,28 +131,36 @@ void *coalesce(void *bp)
     size_t size = GET_SIZE(HDRP(bp));
 
     if (prev_alloc && next_alloc) {       /* Case 1 */
+        add_front_of_free_list(bp);
         return bp;
     }
 
     else if (prev_alloc && !next_alloc) { /* Case 2 */
+        remove_from_free_list(SUCC(bp));
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
+        add_front_of_free_list(bp);
         return (bp);
     }
 
     else if (!prev_alloc && next_alloc) { /* Case 3 */
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
+        remove_from_free_list(PRED(bp));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
+        add_front_of_free_list(PRED(bp));
         return (PREV_BLKP(bp));
     }
 
     else {            /* Case 4 */
+        remove_from_free_list(PRED(bp));
+        remove_from_free_list(SUCC(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)))  +
             GET_SIZE(FTRP(NEXT_BLKP(bp)))  ;
         PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
+        add_front_of_free_list(PRED(bp));
         return (PREV_BLKP(bp));
     }
 }
