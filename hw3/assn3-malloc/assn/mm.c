@@ -5,8 +5,8 @@
  * Blocks are never coalesced or reused.
  * Realloc is implemented directly using mm_malloc and mm_free.
  *
- * NOTE TO STUDENTS: Replace this header comment with your own header
- * comment that gives a high level description of your solution.
+ * For our implementation we used a segregated, explicit double linked free list
+ * That separates through the power of two, and sorted by logarithm
  */
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,9 +30,9 @@ team_t team = {
     /* rafiur.rashid@mail.utoronto.ca */
     "rafiur.rashid@mail.utoronto.ca",
     /* Second member's full name (leave blank if none) */
-    "",
+    "Xuan Fang",
     /* Second member's email address (leave blank if none) */
-    ""
+    "benny.fang@mail.utoronto.ca"
 };
 
 /*************************************************************************
@@ -64,17 +64,33 @@ team_t team = {
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
-#define PRED(bp) ((char *)bp)
-#define SUCC(bp) ((char *)(bp) + WSIZE)
+/* Define the previous location and successor location of free list */
 
-#define PUT_PTR(p1, p2) (*(void**)(p1) = (p2))
+#define PRED(bp) (*(void **)(bp))
+#define SUCC(bp) (*(void **)(bp) + WSIZE)
+
+/* Get an address of a pointer of pred of succ */
+#define GET_PRED(bp) (*(uintptr_t *)(bp))
+#define GET_SUCC(bp) (*(uintptr_t *)( (char *)(bp) + WSIZE) )
+
+/* Put an address of a pointer into another as pred or succ pointer */
+#define PUT_PRED(p1, p2) (*(uintptr_t *)p1 = (uintptr_t)(p2))
+#define PUT_SUCC(p1, p2) (*(uintptr_t *)((char *)(p1) + WSIZE) = (uintptr_t)p2)
 
 void* heap_listp = NULL;
+/* Define prologue and epilogue pointer for testing */
+void* prologue = NULL;
+void* epilogue = NULL;
 
+void add_front_of_free_list(void *bp);
+void remove_from_free_list(void* bp);
+
+/* Define constant such as seg list size, min block size and log of that */
 #define SEG_LIST_SIZE 8
 #define MIN_BLOCK_SIZE (2 * DSIZE)
 #define LOG2_OF_MIN_BLOCK_SIZE 5
 
+/* Declare seg_list as free list */
 static void *SEGREGATED_LIST[SEG_LIST_SIZE] = {NULL};
 
 const int tab64[64] = {
@@ -111,8 +127,9 @@ int mm_init(void)
     PUT(heap_listp + (1 * WSIZE), PACK(DSIZE, 1));   // prologue header
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));   // prologue footer
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));    // epilogue header
+    prologue = (void*) ((char*)heap_listp + WSIZE);	//define prologue pointer
+    epilogue = (void*) ((char*)heap_listp + 3 * WSIZE); //define epilogue pointer
     heap_listp += DSIZE;
-
     return 0;
 }
 
@@ -131,13 +148,13 @@ void *coalesce(void *bp)
     size_t size = GET_SIZE(HDRP(bp));
 
     if (prev_alloc && next_alloc) {       /* Case 1 */
-        add_front_of_free_list(bp);
+    	add_front_of_free_list(bp);
         return bp;
     }
 
     else if (prev_alloc && !next_alloc) { /* Case 2 */
-        remove_from_free_list(SUCC(bp));
-        size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
+    	remove_from_free_list(SUCC(bp));
+    	size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
         add_front_of_free_list(bp);
@@ -145,22 +162,22 @@ void *coalesce(void *bp)
     }
 
     else if (!prev_alloc && next_alloc) { /* Case 3 */
+    	remove_from_free_list(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
-        remove_from_free_list(PRED(bp));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
-        add_front_of_free_list(PRED(bp));
+        add_front_of_free_list(PREV_BLKP(bp));
         return (PREV_BLKP(bp));
     }
 
     else {            /* Case 4 */
-        remove_from_free_list(PRED(bp));
-        remove_from_free_list(SUCC(bp));
+    	remove_from_free_list(NEXT_BLKP(bp));
+    	remove_from_free_list(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)))  +
             GET_SIZE(FTRP(NEXT_BLKP(bp)))  ;
         PUT(HDRP(PREV_BLKP(bp)), PACK(size,0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size,0));
-        add_front_of_free_list(PRED(bp));
+        add_front_of_free_list(PREV_BLKP(bp));
         return (PREV_BLKP(bp));
     }
 }
@@ -186,6 +203,8 @@ void *extend_heap(size_t words)
     PUT(FTRP(bp), PACK(size, 0));                // free block footer
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1));        // new epilogue header
 
+    epilogue = (void*) NEXT_BLKP(bp); //redefine epilogue pointer
+
     /* Coalesce if the previous block was free */
     return coalesce(bp);
 }
@@ -198,12 +217,11 @@ int get_seg_list_index(size_t block_size)
     size |= size >> 4;
     size |= size >> 8;
     size |= size >> 16;
-    size |= size >> 32;
     size++;
 
-    int exponent = logBase2(size);    
+    int exponent = logBase2(size);
 
-    if(exponent < (SEG_LIST_SIZE + LOG2_OF_MIN_BLOCK_SIZE))
+    if( exponent < (SEG_LIST_SIZE + LOG2_OF_MIN_BLOCK_SIZE) )
         return (block_size < size) ? (exponent - LOG2_OF_MIN_BLOCK_SIZE - 1) : (exponent - LOG2_OF_MIN_BLOCK_SIZE);
     else
         return (SEG_LIST_SIZE - 1);
@@ -214,23 +232,23 @@ void add_front_of_free_list(void *bp)
     size_t block_size = GET_SIZE(HDRP(bp));
     int index = get_seg_list_index(block_size);
 
-    if(SEGREGATED_LIST[index])
+    if(SEGREGATED_LIST[index] != NULL)
     {
         void *current = SEGREGATED_LIST[index];
-        PUT_PTR(SUCC(bp), current);
-        PUT_PTR(PRED(current), bp);
+        PUT_SUCC(bp, current);
+        PUT_PRED(current, bp);
+        PUT_PRED(bp, 0);
         SEGREGATED_LIST[index] = bp;
-        PUT_PTR(PRED(bp), NULL);
     }
     else
     {
+    	PUT_SUCC(bp, 0);
+    	PUT_PRED(bp, 0);
         SEGREGATED_LIST[index] = bp;
-        PUT_PTR(PRED(bp), NULL);
-        PUT_PTR(SUCC(bp), NULL);
     }
 }
 
-void remove_from_free_list(void* bp) 
+void remove_from_free_list(void* bp)
 {
     size_t block_size = GET_SIZE(HDRP(bp));
     int index = get_seg_list_index(block_size);
@@ -238,18 +256,26 @@ void remove_from_free_list(void* bp)
     if(SEGREGATED_LIST[index] == NULL)
         return;
 
-    if(SEGREGATED_LIST[index] == bp)
+    if (SEGREGATED_LIST[index] == bp)
     {
-        SEGREGATED_LIST[index] =  SUCC(bp);
+    	if (GET_SUCC(bp) != 0) {
+    		//printf ("Successor is %lx\n", GET_SUCC(bp));
+			PUT_PRED(SUCC(bp), 0);
+    		SEGREGATED_LIST[index] = SUCC(bp);
+    	}
+    	else SEGREGATED_LIST[index] = NULL;
         return;
     }
 
-    if(PRED(bp))
-        PUT_PTR(SUCC(PRED(bp)), SUCC(bp));
+    else {
+    	if (GET_PRED(bp) == 0) {
+			PUT_SUCC(PRED(bp), SUCC(bp));
+		}
 
-    if(SUCC(bp))
-        PUT_PTR(PRED(SUCC(bp)), PRED(bp));
-
+		if (GET_SUCC(bp) == 0) {
+			PUT_PRED(SUCC(bp), PRED(bp));
+		}
+	}
     return;
 }
 
@@ -270,11 +296,14 @@ void * find_fit(size_t asize)
     for(i = seg_list_index; i < SEG_LIST_SIZE; i++)
     {
         void *current = SEGREGATED_LIST[i];
-        while(current && GET_SIZE(HDRP(current)) < asize)
-            PUT_PTR(current, SUCC(current));
+        while(current && GET_SIZE(HDRP(current)) < asize) current = SUCC(current);
 
         if(current)
+        {
+        	//do not do remove here but instead in the place function
+            //remove_from_free_list(current);
             return current;
+        }
     }
     return NULL;
 }
@@ -282,16 +311,15 @@ void * find_fit(size_t asize)
 void split(void *bp, size_t asize)
 {
     size_t remaining_size = GET_SIZE(HDRP(bp)) - asize;
-    void *split_block = (char*)(bp) + asize;
+    void *split_block = (void*)((char*)(bp) + asize);
 
     remove_from_free_list(bp);
 
     PUT(HDRP(bp), PACK(asize, 1));
-    //PUT(FTRP(bp), PACK(asize, 1));
+    PUT(FTRP(bp), PACK(asize, 1));
 
     PUT(HDRP(split_block), PACK(remaining_size, 0));
     PUT(FTRP(split_block), PACK(remaining_size, 0));
-    coalesce(split_block);
 
     add_front_of_free_list(split_block);
 }
@@ -312,7 +340,7 @@ void place(void* bp, size_t asize)
     {
         remove_from_free_list(bp);
         PUT(HDRP(bp), PACK(bsize, 1));
-        //PUT(FTRP(bp), PACK(bsize, 1));
+        PUT(FTRP(bp), PACK(bsize, 1));
     }
 }
 
@@ -406,8 +434,36 @@ void *mm_realloc(void *ptr, size_t size)
 /**********************************************************
  * mm_check
  * Check the consistency of the memory heap
- * Return nonzero if the heap is consistant.
+ * Return nonzero if the heap is consistent.
+ * Checks:
+ * -consistency of the header and footer
+ * -validity of prologue and epilogue when traversing through the heap
+ * -if there is non-coalesced blocks
  *********************************************************/
 int mm_check(void){
-    return 1;
+	void* bp;
+	for (bp = prologue; bp < epilogue; bp = NEXT_BLKP(bp)) {
+		//check that the next block is not free
+		if(!GET_ALLOC(bp) && !GET_ALLOC(NEXT_BLKP(bp) ) ){
+			printf("There are non-coalesced blocks!\n");
+			return -1;
+		}
+		//check if the size specified in header and footer are consistent
+		if (GET_SIZE(HDRP(bp)) != GET_SIZE(FTRP(bp))){
+			printf("Heap is not consistent.\n");
+			return -1;
+		}
+	}
+	//check if the heap ended in epilogue
+	if(bp != epilogue){
+		printf("The heap didn't end in epilogue.\n");
+		return -1;
+	}
+	while(bp > prologue) bp = PREV_BLKP(bp);
+	//check if the heap began in prologue
+	if(bp != prologue){
+		printf("The heap didn't begin in prologue.\n");
+		return -1;
+	}
+    return 0;
 }
