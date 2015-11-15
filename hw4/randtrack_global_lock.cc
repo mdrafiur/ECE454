@@ -18,7 +18,7 @@
 
 void *run_thread (void* tid);
 pthread_mutex_t mutex;
-
+//pthread_cond_t* cond;
 
 /*
  * ECE454 Students:
@@ -27,9 +27,9 @@ pthread_mutex_t mutex;
 team_t team = {
     "Eclipse",                  /* Team name */
 
-    "AAA BBB",                    /* First member full name */
-    "9999999999",                 /* First member student number */
-    "AAABBB@CCC",                 /* First member email address */
+	"Md Rafiur Rashid",                    /* First member full name */
+    "998544240",                 /* First member student number */
+	"rafiur.rashid@mail.utoronto.ca",                 /* First member email address */
 
     "Xuan (Benny) Fang",                           /* Second member full name */
     "999159887",                           /* Second member student number */
@@ -91,8 +91,16 @@ main (int argc, char* argv[]){
 	  exit(0);
   }
   //else printf("Running %d threads\n", num_threads);
-  // initialize mutex lock and threads
+  // initialize mutex lock and allocate cv
   pthread_mutex_init(&mutex, NULL);
+  /*
+  cond = (pthread_cond_t*)malloc(num_threads * sizeof(pthread_cond_t))
+  for (i=0; i<num_threads; i++){
+	  //initialize cv variable
+	  pthread_cond_init(&cond[i], NULL);
+  }
+  */
+  // allocate and initialize thread and thread id
   pthread_t* threads = (pthread_t*)malloc(num_threads * sizeof(pthread_t));
   int* tid = (int*)malloc(num_threads * sizeof(int));
   // create thread here, equal to number of thread specified

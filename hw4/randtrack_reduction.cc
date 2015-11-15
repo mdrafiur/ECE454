@@ -1,9 +1,8 @@
 /*
- * randtrack_tm.cc
+ * randtrack_reduction.cc
  *
- *  Created on: Nov 12, 2015
+ *  Created on: Nov 13, 2015
  *      Author: fangxuan
- *
  */
 
 #include <stdio.h>
@@ -55,6 +54,7 @@ class sample {
 // it is a C++ template, which means we define the types for
 // the element and key value here: element is "class sample" and
 // key value is "unsigned".
+hash<sample,unsigned>* h_thread;
 hash<sample,unsigned> h;
 
 int
@@ -83,8 +83,16 @@ main (int argc, char* argv[]){
 
   // initialize a 16K-entry (2**14) hash of empty lists
   h.setup(14);
-  // prevent faulty input
+  // initialize similarly for private hash table of each thread
+  if (num_threads == 1) h_thread = &h;
+  else {
+	  h_thread = (hash<sample,unsigned>*)malloc(num_threads * sizeof(hash<sample,unsigned>));
+	  for (i=0; i<num_threads; i++){
+		  h_thread[i].setup(14);
+	  }
+  }
 
+  // prevent faulty input
   if (num_threads != 1 && num_threads != 2 && num_threads != 4) {
 	  printf ("This program only allows 1,2 or 4 threads. Please try again.\n");
 	  exit(0);
@@ -100,13 +108,13 @@ main (int argc, char* argv[]){
 	  pthread_create(&(threads[i]), NULL, &run_thread, (void*) &tid[i]);
   }
   for (i=0; i<num_threads; i++){
-		pthread_join(threads[i], NULL);
+	  pthread_join(threads[i], NULL);
   }
-  // process streams starting with different initial numbers
-
+  // combine the hash table into one after they are all done
+  h.combine(h_thread, num_threads);
   // print a list of the frequency of all samples
   h.print();
-  printf("If diff only shows this line the test for randtrack_tm.cc is successful!\n");
+  printf("If diff only shows this line the test for randtrack_reduction.cc is successful!\n");
   return 0;
 }
 
@@ -115,7 +123,8 @@ void* run_thread (void* tid) {
 	int slice, from, to, rnum;
 	unsigned key;
 	sample *s;
-	from = (*((int*)tid) * NUM_SEED_STREAMS) / num_threads;
+	int tid_int = *((int*)tid);
+	from = (tid_int * NUM_SEED_STREAMS) / num_threads;
 	to = from + NUM_SEED_STREAMS / num_threads;
 	//printf("Running from %d to %d\n", from, to);
 	for (i = from; i < to; i++) {
@@ -129,24 +138,19 @@ void* run_thread (void* tid) {
 			// force the sample to be within the range of 0..RAND_NUM_UPPER_BOUND-1
 			key = rnum % RAND_NUM_UPPER_BOUND;
 			// lock here because we are inserting the data which is shared between threads
-			__transaction_atomic {
-				// if this sample has not been counted before
-				if (!(s = h.lookup(key))){
-					// insert a new element for it into the hash table
-					s = new sample(key);
-					h.insert(s);
-				}
-				// increment the count for the sample
-				s->count++;
-				// unlock here after we are done
+			// if this sample has not been counted before
+			if (!(s = h_thread[tid_int].lookup(key))){
+				// insert a new element for it into the hash table
+				s = new sample(key);
+				h_thread[tid_int].insert(s);
 			}
+			// increment the count for the sample
+			s->count++;
+			// unlock here after we are done
 		}
 	}
 	pthread_exit(NULL);
 }
-
-
-
 
 
 

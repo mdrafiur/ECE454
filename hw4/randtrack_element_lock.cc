@@ -1,9 +1,8 @@
 /*
- * randtrack_tm.cc
+ * randtrack_element_lock.cc
  *
- *  Created on: Nov 12, 2015
+ *  Created on: Nov 13, 2015
  *      Author: fangxuan
- *
  */
 
 #include <stdio.h>
@@ -18,6 +17,7 @@
 #define NUM_SEED_STREAMS            4
 
 void *run_thread (void* tid);
+//pthread_mutex_t mutex;
 
 /*
  * ECE454 Students:
@@ -83,8 +83,9 @@ main (int argc, char* argv[]){
 
   // initialize a 16K-entry (2**14) hash of empty lists
   h.setup(14);
+  // set a lock inside of hash class for each list
+  h.setlock_ele();
   // prevent faulty input
-
   if (num_threads != 1 && num_threads != 2 && num_threads != 4) {
 	  printf ("This program only allows 1,2 or 4 threads. Please try again.\n");
 	  exit(0);
@@ -100,13 +101,13 @@ main (int argc, char* argv[]){
 	  pthread_create(&(threads[i]), NULL, &run_thread, (void*) &tid[i]);
   }
   for (i=0; i<num_threads; i++){
-		pthread_join(threads[i], NULL);
+	  pthread_join(threads[i], NULL);
   }
   // process streams starting with different initial numbers
 
   // print a list of the frequency of all samples
   h.print();
-  printf("If diff only shows this line the test for randtrack_tm.cc is successful!\n");
+  printf("If diff only shows this line the test for randtrack_element_lock.cc is successful!\n");
   return 0;
 }
 
@@ -114,7 +115,7 @@ void* run_thread (void* tid) {
 	int i,j,k;
 	int slice, from, to, rnum;
 	unsigned key;
-	sample *s;
+
 	from = (*((int*)tid) * NUM_SEED_STREAMS) / num_threads;
 	to = from + NUM_SEED_STREAMS / num_threads;
 	//printf("Running from %d to %d\n", from, to);
@@ -129,24 +130,14 @@ void* run_thread (void* tid) {
 			// force the sample to be within the range of 0..RAND_NUM_UPPER_BOUND-1
 			key = rnum % RAND_NUM_UPPER_BOUND;
 			// lock here because we are inserting the data which is shared between threads
-			__transaction_atomic {
-				// if this sample has not been counted before
-				if (!(s = h.lookup(key))){
-					// insert a new element for it into the hash table
-					s = new sample(key);
-					h.insert(s);
-				}
-				// increment the count for the sample
-				s->count++;
-				// unlock here after we are done
-			}
+			//pthread_mutex_lock(&mutex);
+			h.lookup_and_insert_if_absent_element(key);
+			// unlock here after we are done
+			//pthread_mutex_unlock(&mutex);
 		}
 	}
 	pthread_exit(NULL);
 }
-
-
-
 
 
 

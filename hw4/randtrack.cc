@@ -16,9 +16,9 @@
 team_t team = {
     "Eclipse",                  /* Team name */
 
-    "AAA BBB",                    /* First member full name */
-    "9999999999",                 /* First member student number */
-    "AAABBB@CCC",                 /* First member email address */
+	"Md Rafiur Rashid",                    /* First member full name */
+    "998544240",                 /* First member student number */
+	"rafiur.rashid@mail.utoronto.ca",                 /* First member email address */
 
     "Xuan (Benny) Fang",                           /* Second member full name */
     "999159887",                           /* Second member student number */
