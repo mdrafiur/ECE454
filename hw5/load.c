@@ -1,3 +1,10 @@
+/*****************************************************************************
+ * load.c
+ * Added condition to this file such that the program will not load the board
+ * If its size exceed 10,000
+ * Or if the board is not a square as specified in the requirement
+ ****************************************************************************/
+
 #include "load.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -29,6 +36,7 @@ load_dimensions (FILE* input, int* nrows, int* ncols)
 		fclose (input);
 		exit (EXIT_FAILURE);
 	}
+	// checking if number of rows is valid
 	if (*nrows < 1) {
 		fprintf (stderr, "*** Number of rows %d must be positive! ***\n", *nrows);
 		fclose (input);
@@ -38,7 +46,7 @@ load_dimensions (FILE* input, int* nrows, int* ncols)
 		fclose (input);
 		exit (EXIT_FAILURE);
 	}
-
+	// checking if number of columns is valid
 	if (*ncols < 1) {
 		fprintf (stderr, "*** Number of cols %d must be positive! ***\n", *ncols);
 		fclose (input);
@@ -48,6 +56,7 @@ load_dimensions (FILE* input, int* nrows, int* ncols)
 		fclose (input);
 		exit (EXIT_FAILURE);
 	}
+	// checking if the board is a square
 	if (*nrows != *ncols) {
 		fprintf (stderr, "*** Number of rows %d does not equal to number of cols %d! ***\n", *nrows, *ncols);
 		fclose (input);

@@ -25,8 +25,10 @@
 // Determine value given board and its coordinate
 #define BOARD( __board, __i, __j )  (__board[(__i) + LDA*(__j)])
 
-// Define the number of threads to be 4
-#define num_threads 4
+// Define the number of threads to be 8
+#define num_threads 8
+#define row_num_slice 4
+#define col_num_slice 2
 
 // Define a structure of variables to be passed into the threads as arguments
 typedef struct {
@@ -149,15 +151,16 @@ void* thread_game_of_life (void* targs)
 	pthread_mutex_t* mutex = args->mutex;
 	pthread_cond_t* cond = args->cond;
 
-	int slice = nrows / (num_threads / 2);
-	int row_start = tid % (num_threads / 2) * slice;
-	int row_end = row_start + slice;
-	int col_start = tid / (num_threads / 2) * slice;
-	int col_end = col_start + slice;
+	int row_slice = nrows / row_num_slice;
+	int col_slice = ncols / col_num_slice;
+	int row_start = tid % row_num_slice * row_slice;
+	int row_end = row_start + row_slice;
+	int col_start = tid / row_num_slice * col_slice;
+	int col_end = col_start + col_slice;
 
 	const int LDA = nrows;
 	int curgen, i, j;
-	//int ii, jj;
+	int ii, jj;
 	/*
 	 * Here we will take advantage of lab 2 optimization as shown below
 
@@ -169,48 +172,106 @@ void* thread_game_of_life (void* targs)
                 	...
      *
      */
-	// Let T be either 32 or slice, if slice is smaller
-	//int T = (slice < 32) ? slice : 32;
+	// Let T be either 32 or 16 smallest_slice, if smallest_slice is not large
+	int smallest_slice = (row_slice < col_slice) ? row_slice : col_slice;
+	int T = (smallest_slice < 32) ? smallest_slice : 32;
+
+	char self, nw, n, ne, e, se, s, sw, w;
+	char iself, inw, in, ine, ie, ise, is, isw, iw;
 
 	for (curgen = 0; curgen < gens_max; curgen++)
 	{
-		for (i = row_start; i < row_end; i++)
+		for (i = col_start; i < col_end; i+=T)
 		{
-			for (j = col_start; j < col_end; j++)
+			// computing north and south at most outer loop will improve performance
+        	const int north = mod (i-1, nrows);
+        	const int south = mod (i+1, nrows);
+			for (j = row_start; j < row_end; j+=T)
 			{
-			const int inorth = mod (i-1, nrows);
-			const int isouth = mod (i+1, nrows);
-			const int jwest = mod (j-1, ncols);
-			const int jeast = mod (j+1, ncols);
+	            for(jj = j; jj < j+T; jj++)
+	            {
+	            	//compute j here to speed up inner loop
+	            	const int east = mod (jj+1, ncols);
+	            	const int west = mod (jj-1, ncols);
+	            	// Here we have two cases: when we first read the element of the board in this block vs any other time
+	            	// If it is not our first time, we can essentially use 6/9 of the previous iteration
+	            	// and avoid reading the board every time to reduce load overhead
+	            	if (jj == j) {
+	            		iself = self = BOARD (inboard, i, jj);
+	            		inw = nw = BOARD (inboard, north, west);
+	            		in = n = BOARD (inboard, north, jj);
+	            		ine = ne = BOARD (inboard, north, east);
+	            		iw = w = BOARD (inboard, i, west);
+	            		ie = e = BOARD (inboard, i, east);
+	            		isw = sw = BOARD (inboard, south, west);
+	            		is = s = BOARD (inboard, south, jj);
+	            		ise = se = BOARD (inboard, south, east);
+	            	}
+                	/*
+                	 * ooo-	   <- we overwrite the 3 most west cells because we no longer need their value
+                	 * ox*-	   <- x: old self, jj, *: new self, jj + 1
+                	 * ooo-	   <- read these three new cell for this iteration
+                	 */
+	            	else {
+	            		inw = nw = n;
+	            		iw = w = self;
+	            		isw = sw = s;
+	            		in = n = ne;
+	            		iself = self = e;
+	            		is = s = se;
+	            		ine = ne = BOARD (inboard, north, east);
+	            		ie = e = BOARD (inboard, i, east);
+	            		ise = se = BOARD (inboard, south, east);
+	            	}
+    				const char neighbor_count =
+    				inw + in + ine + ie + ise + is + isw + iw;
+    				BOARD(outboard, i, jj) = alivep (neighbor_count, iself);
 
-			const char neighbor_count =
-			BOARD (inboard, inorth, jwest) +
-			BOARD (inboard, inorth, j) +
-			BOARD (inboard, inorth, jeast) +
-			BOARD (inboard, i, jwest) +
-			BOARD (inboard, i, jeast) +
-			BOARD (inboard, isouth, jwest) +
-			BOARD (inboard, isouth, j) +
-			BOARD (inboard, isouth, jeast);
-
-			BOARD(outboard, i, j) = alivep (neighbor_count, BOARD (inboard, i, j));
+    				// run the rest of the iteration, from i+1
+	                for (ii = i + 1; ii < i+T; ii++)
+	                {
+	                	// similarly, for everytime we go down the column, we should be able to use 6/9 of the elements
+	                	/*
+	                	 * ooo	   <- we overwrite these north cells because we no longer need their value
+	                	 * oxo	   <- x: old self, ii
+	                	 * o*o	   <- *: new self, ii + 1
+	                	 * ---     <- read these three new cell for this iteration
+	                	 */
+						const int isouth = mod (ii+1, nrows);
+						inw = iw;
+						in = iself;
+						ine = ie;
+						iw = isw;
+						iself = is;
+						ie = ise;
+						isw = BOARD (inboard, isouth, west);
+						is = BOARD (inboard, isouth, jj);
+						ise = BOARD (inboard, isouth, east);
+	    				const char neighbor_count =
+	    				inw + in + ine + ie + ise + is + isw + iw;
+	    				BOARD(outboard, ii, jj) = alivep (neighbor_count, iself);
+	                }
+	            }
 			}
 		}
-		barrier(arrived, mutex, cond);
+		// using barrior function that was covered in lecture to synchronize
+		barrier(arrived, mutex, cond, outboard, inboard);
 		SWAP_BOARDS( outboard, inboard );
 	}
 	pthread_exit(NULL);
 }
 
-void barrier (int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond) {
+// function to synchronize the threads before doing another iteration
+void barrier (int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond, char* outboard, char* inboard) {
 	pthread_mutex_lock(mutex);
 	(*arrived)++;
 	if (*arrived < num_threads) {
 		pthread_cond_wait(cond, mutex);
 	}
 	else {
+		*arrived = 0; /* be prepared for next barrier */
+		//SWAP_BOARDS( outboard, inboard );
 		pthread_cond_broadcast(cond);
-    	*arrived = 0; /* be prepared for next barrier */
   	}
 	pthread_mutex_unlock(mutex);
 }

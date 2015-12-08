@@ -37,6 +37,6 @@ optimized_game_of_life (char* outboard,
 
 void* thread_game_of_life (void* targs);
 
-void barrier(int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond);
+void barrier(int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond, char* outboard, char* inboard);
 
 #endif /* _life_h */
