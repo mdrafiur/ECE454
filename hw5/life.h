@@ -18,7 +18,7 @@ game_of_life (char* outboard,
 	      const int gens_max);
 
 /**
- * Same output as game_of_life() above, except this is not
+ * Same output as game_of_life() above if opmization is not defined, except this is not
  * parallelized.  Useful for checking output.
  */
 char*
@@ -28,6 +28,7 @@ sequential_game_of_life (char* outboard,
 			 const int ncols,
 			 const int gens_max);
 
+// optimized version of the function defined here
 char*
 optimized_game_of_life (char* outboard,
 		 char* inboard,
@@ -35,8 +36,10 @@ optimized_game_of_life (char* outboard,
 		 const int ncols,
 		 const int gens_max);
 
+// function that each thread run to optimize game_of_life
 void* thread_game_of_life (void* targs);
 
-void barrier(int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond, char* outboard, char* inboard);
+// function to synchronize the threads before doing another iteration
+void barrier(int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond);
 
 #endif /* _life_h */

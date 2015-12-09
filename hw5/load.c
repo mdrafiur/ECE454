@@ -25,6 +25,7 @@ make_board (const int nrows, const int ncols)
   return board;
 }
 
+// function to load the board. Made some changes here to check faulty cases.
 static void
 load_dimensions (FILE* input, int* nrows, int* ncols)
 {

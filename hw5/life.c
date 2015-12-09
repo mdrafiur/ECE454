@@ -1,6 +1,27 @@
 /*****************************************************************************
  * life.c
  * Parallelized and optimized implementation of the game of life resides here
+ *
+ * In this lab, our group utilized various speedups to achieve the result of approximately 8x
+ * the speed of the sequential_game_of_life (~13-15s vs ~110-115s on lab machine).
+ * Our group utilized the following techniques to achieve this:
+ *
+ * Pthread parallelization: we created 8 threads using pthread_create, dividing
+ * the board into 4 horizontal pieces and 2 vertical pieces (4 x 2 = 8).
+ * Each thread runs one slice of the board and is synchronized using barrier function
+ * covered in the lecture slides before each iteration. Finally, pthread_join is called in the main function.
+ *
+ * Loop blocking: using techniques similar to that of Lab2, we divided the slice
+ * of each thread into further smaller chunks increment by T, where T is either 32
+ * or size of the width/length of the slice, whichever that is smaller. We followed
+ * i->j->jj->ii loop order to achieve the best result by traversing in column order
+ *
+ * Loop-Invariant Code Motion (LICM): Take the const int computation and board value
+ * computation out of the loop as much as possible to reduce its number of time ran
+ * and remove dependency as much as possible to also achieve so
+ *
+ * Local variable “cache”: use local variable to save previously loaded board value
+ * to reuse 6/9 of the value in each iteration, greatly reducing array load time.
  ****************************************************************************/
 #include "life.h"
 #include "util.h"
@@ -138,6 +159,7 @@ optimized_game_of_life (char* outboard,
 	*/
 }
 
+// function that each thread run to optimize game_of_life
 void* thread_game_of_life (void* targs)
 {
 	thread_args* args = (thread_args*) targs;
@@ -161,17 +183,7 @@ void* thread_game_of_life (void* targs)
 	const int LDA = nrows;
 	int curgen, i, j;
 	int ii, jj;
-	/*
-	 * Here we will take advantage of lab 2 optimization as shown below
 
-    T = 32;
-    for(i = 0; i < dim; i+=T)
-        for(j = 0; j < dim; j+=T)
-            for(jj = j; jj < j+T; jj++)
-                for(ii = i; ii < i+T; ii++)
-                	...
-     *
-     */
 	// Let T be either 32 or 16 smallest_slice, if smallest_slice is not large
 	int smallest_slice = (row_slice < col_slice) ? row_slice : col_slice;
 	int T = (smallest_slice < 32) ? smallest_slice : 32;
@@ -181,6 +193,17 @@ void* thread_game_of_life (void* targs)
 
 	for (curgen = 0; curgen < gens_max; curgen++)
 	{
+		/*
+		 * Here we will take advantage of lab 2 optimization as shown below
+
+	    T = 32;
+	    for(i = 0; i < dim; i+=T)
+	        for(j = 0; j < dim; j+=T)
+	            for(jj = j; jj < j+T; jj++)
+	                for(ii = i; ii < i+T; ii++)
+	                	...
+	     *
+	     */
 		for (i = col_start; i < col_end; i+=T)
 		{
 			// computing north and south at most outer loop will improve performance
@@ -208,6 +231,7 @@ void* thread_game_of_life (void* targs)
 	            		ise = se = BOARD (inboard, south, east);
 	            	}
                 	/*
+                	 * This is a shift to the east as we traverse by row
                 	 * ooo-	   <- we overwrite the 3 most west cells because we no longer need their value
                 	 * ox*-	   <- x: old self, jj, *: new self, jj + 1
                 	 * ooo-	   <- read these three new cell for this iteration
@@ -230,8 +254,10 @@ void* thread_game_of_life (void* targs)
     				// run the rest of the iteration, from i+1
 	                for (ii = i + 1; ii < i+T; ii++)
 	                {
-	                	// similarly, for everytime we go down the column, we should be able to use 6/9 of the elements
+	                	//
 	                	/*
+	                	 * Similarly, for every time we go down the column, we should be able to use 6/9 of the elements
+	                	 * This is a shift to the south as we traverse by column
 	                	 * ooo	   <- we overwrite these north cells because we no longer need their value
 	                	 * oxo	   <- x: old self, ii
 	                	 * o*o	   <- *: new self, ii + 1
@@ -255,14 +281,14 @@ void* thread_game_of_life (void* targs)
 			}
 		}
 		// using barrior function that was covered in lecture to synchronize
-		barrier(arrived, mutex, cond, outboard, inboard);
+		barrier(arrived, mutex, cond);
 		SWAP_BOARDS( outboard, inboard );
 	}
 	pthread_exit(NULL);
 }
 
 // function to synchronize the threads before doing another iteration
-void barrier (int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond, char* outboard, char* inboard) {
+void barrier (int* arrived, pthread_mutex_t* mutex, pthread_cond_t* cond) {
 	pthread_mutex_lock(mutex);
 	(*arrived)++;
 	if (*arrived < num_threads) {
